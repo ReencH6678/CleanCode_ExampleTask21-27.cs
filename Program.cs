@@ -17,37 +17,45 @@ namespace CleanCode_ExampleTask21_27
         }
     }
 
-    public class PassportService
+    public class PassportPresenter
     {
-        private PasportValidator _validator;
-        private PassportRepository _repository;
-        private Sha256Hasher _shaHasher;
+        private Menu _menu;
+        private PassportFinder _passportFinder;
 
-        public PassportService(PasportValidator validator, PassportRepository repository, Sha256Hasher shaHasher)
+        public PassportPresenter(Menu menu, PassportFinder passportFinder)
         {
-            if (validator == null)
+            if (menu == null)
                 throw new ArgumentNullException();
 
-            if (repository == null)
+            if (passportFinder == null)
                 throw new ArgumentNullException();
 
-            if (shaHasher == null)
-                throw new ArgumentNullException();
+            _passportFinder = passportFinder; 
+            _menu = menu;
+        }
+        
+        public void CheckPassport()
+        {
+            Passport passport = _menu.GetPassport();
+            _menu.ShowPassportInfo(_passportFinder.GetPassportCheckResult(passport), passport);
+        }
+    }
 
-            _validator = validator;
+    public class PassportFinder
+    {
+        private PassportRepository _repository;
+
+        public PassportFinder(PassportRepository repository)
+        {
             _repository = repository;
-            _shaHasher = shaHasher;
         }
 
-        public PassportCheckResult CheckPassport(Passport passport)
+        public PassportCheckResult GetPassportCheckResult(Passport passport)
         {
-            if(passport  == null)
+            if (passport == null)
                 throw new ArgumentNullException();
 
-            string passportData = _validator.Validate(passport);
-            string hash = _shaHasher.ComputeSha256Hash(passportData);
-
-            DataTable dataTable = _repository.GetPassportData(hash);
+            DataTable dataTable = _repository.GetPassportData(passport.GetHash());
 
             if (dataTable.Rows.Count == 0)
                 return new PassportCheckResult(false, false);
@@ -60,46 +68,27 @@ namespace CleanCode_ExampleTask21_27
 
     public class Passport
     {
+        private const string EmptyChar = " ";
+        private const int CorrecrLength = 10;
+
         public Passport(string series)
         {
             if (series == null)
                 throw new ArgumentNullException();
 
-            Series = series;
+            Series = Normalize(series);
+
+            if (IsFormatCorrect(Series) == false)
+                throw new ArgumentException(); ;
         }
 
         public string Series { get; private set; }
-    }
 
-    public class PassportCheckResult
-    {
-        public PassportCheckResult(bool exist, bool granted)
+        public string GetHash()
         {
-            Exist = exist;
-            Granted = granted;
-        }
+            Sha256Hasher hasher = new Sha256Hasher();
 
-        public bool Exist { get; private set; }
-        public bool Granted { get; private set; }
-
-    }
-
-    public class PasportValidator
-    {
-        private const string EmptyChar = " ";
-        private const int CorrecrLength = 10;
-
-        public string Validate(Passport passport)
-        {
-            if (passport == null)
-                throw new ArgumentNullException();
-
-            string passportData = Normalize(passport.Series);
-
-            if (IsFormatCorrect(passportData) == false)
-                throw new ArgumentException();
-
-            return passportData;
+            return hasher.ComputeSha256Hash(Series);
         }
 
         private bool IsFormatCorrect(string data)
@@ -125,6 +114,19 @@ namespace CleanCode_ExampleTask21_27
 
             return normalizedData;
         }
+    }
+
+    public class PassportCheckResult
+    {
+        public PassportCheckResult(bool exist, bool granted)
+        {
+            Exist = exist;
+            Granted = granted;
+        }
+
+        public bool Exist { get; private set; }
+        public bool Granted { get; private set; }
+
     }
 
     public class Sha256Hasher
@@ -186,15 +188,15 @@ namespace CleanCode_ExampleTask21_27
 
     public class Menu
     {
-        public void ShowPassportInfo(PassportService passportService, Passport passport)
+        public Passport GetPassport()
+        {
+            return new Passport(Console.ReadLine());
+        }
+
+        public void ShowPassportInfo(PassportCheckResult result, Passport passport)
         {
             if(passport == null)
                 throw new ArgumentNullException();
-
-            if(passportService == null)
-                throw new ArgumentNullException();
-
-            PassportCheckResult result = passportService.CheckPassport(passport);
 
             if (result.Exist == false)
                 textResult.Text = "По паспорту «" + passport.Series + "» доступ к бюллетеню на дистанционном электронном голосовании ПРЕДОСТАВЛЕН";
