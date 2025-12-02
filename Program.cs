@@ -12,15 +12,27 @@ namespace CleanCode_ExampleTask21_27
     {
         static void Main(string[] args)
         {
+            MessegeBox messegeBox = new MessegeBox();
+            string databasePath = "Path";
 
+            Sha256Hasher hasher = new Sha256Hasher();
 
+            DatabaseContext databaseContext = new DatabaseContext(databasePath);
+            PassportReposetory passportReposetory = new PassportReposetory(databaseContext);
+            PassportFinder passportFinder = new PassportFinder(passportReposetory, hasher);
+
+            Menu menu = new Menu(messegeBox);
+            PassportPresenter presenter = new PassportPresenter(menu, passportFinder);
+
+            menu.SetPresenter(presenter);
+            menu.HandleUserInput();
         }
     }
 
-    public class PassportPresenter
+    public class PassportPresenter : IPresenter
     {
-        private Menu _menu;
-        private PassportFinder _passportFinder;
+        private readonly IMessegeViewer _menu;
+        private readonly PassportFinder _passportFinder;
 
         public PassportPresenter(Menu menu, PassportFinder passportFinder)
         {
@@ -30,39 +42,43 @@ namespace CleanCode_ExampleTask21_27
             if (passportFinder == null)
                 throw new ArgumentNullException();
 
-            _passportFinder = passportFinder; 
+            _passportFinder = passportFinder;
             _menu = menu;
         }
-        
-        public void CheckPassport()
+
+        public void HandleData(string passportSeries)
         {
-            Passport passport = _menu.GetPassport();
-            _menu.ShowPassportInfo(_passportFinder.GetPassportCheckResult(passport), passport);
+            if (string.IsNullOrWhiteSpace(passportSeries))
+                throw new ArgumentNullException();
+
+            Passport passport = new Passport(passportSeries);
+
+            bool result = _passportFinder.GetPassportCheckResult(passport).HaveVoted;
+
+            if (result)
+                _menu.ShowMessege("По паспорту «" + passport.Series + "» доступ к бюллетеню на дистанционном электронном голосовании ПРЕДОСТАВЛЕН");
+            else if (result == false)
+                _menu.ShowMessege("По паспорту «" + passport.Series + "» доступ к бюллетеню на дистанционном электронном голосовании НЕ ПРЕДОСТАВЛЯЛСЯ");
+            else
+                _menu.ShowMessege("Паспорт «" + passport.Series + "» в списке участников дистанционного голосования НЕ НАЙДЕН");
         }
     }
 
     public class PassportFinder
     {
-        private PassportRepository _repository;
+        private readonly Sha256Hasher _hasher;
+        private readonly PassportReposetory _reposetory;
 
-        public PassportFinder(PassportRepository repository)
+        public PassportFinder(PassportReposetory repository, Sha256Hasher hasher)
         {
-            _repository = repository;
+            _reposetory = repository;
+            _hasher = hasher;
         }
 
         public PassportCheckResult GetPassportCheckResult(Passport passport)
         {
-            if (passport == null)
-                throw new ArgumentNullException();
-
-            DataTable dataTable = _repository.GetPassportData(passport.GetHash());
-
-            if (dataTable.Rows.Count == 0)
-                return new PassportCheckResult(false, false);
-
-            bool granted = Convert.ToBoolean(dataTable.Rows[0].ItemArray[1]);
-
-            return new PassportCheckResult(true, granted);
+            string hash = _hasher.ComputeSha256Hash(passport.Series);
+            return _reposetory.GetPassportCheckResult(hash);
         }
     }
 
@@ -73,27 +89,20 @@ namespace CleanCode_ExampleTask21_27
 
         public Passport(string series)
         {
-            if (series == null)
+            if (string.IsNullOrWhiteSpace(series))
                 throw new ArgumentNullException();
 
             Series = Normalize(series);
 
             if (IsFormatCorrect(Series) == false)
-                throw new ArgumentException(); ;
+                throw new ArgumentException();
         }
 
         public string Series { get; private set; }
 
-        public string GetHash()
-        {
-            Sha256Hasher hasher = new Sha256Hasher();
-
-            return hasher.ComputeSha256Hash(Series);
-        }
-
         private bool IsFormatCorrect(string data)
         {
-            if (data == null)
+            if (string.IsNullOrWhiteSpace(data))
                 throw new ArgumentNullException();
 
             if (data.Length != CorrecrLength)
@@ -104,13 +113,10 @@ namespace CleanCode_ExampleTask21_27
 
         private string Normalize(string data)
         {
-            if (data == null)
-                throw new ArgumentNullException();
+            if (string.IsNullOrWhiteSpace(data))
+                return null;
 
             string normalizedData = data.Trim().Replace(EmptyChar, string.Empty);
-
-            if (normalizedData.Length == 0)
-                return null;
 
             return normalizedData;
         }
@@ -118,15 +124,12 @@ namespace CleanCode_ExampleTask21_27
 
     public class PassportCheckResult
     {
-        public PassportCheckResult(bool exist, bool granted)
+        public PassportCheckResult(bool haveVoted)
         {
-            Exist = exist;
-            Granted = granted;
+            HaveVoted = haveVoted;
         }
 
-        public bool Exist { get; private set; }
-        public bool Granted { get; private set; }
-
+        public bool HaveVoted { get; private set; }
     }
 
     public class Sha256Hasher
@@ -135,7 +138,7 @@ namespace CleanCode_ExampleTask21_27
 
         public string ComputeSha256Hash(string rawData)
         {
-            if (rawData == null)
+            if (string.IsNullOrEmpty(rawData))
                 throw new ArgumentNullException();
 
             var sha256 = SHA256.Create();
@@ -150,21 +153,49 @@ namespace CleanCode_ExampleTask21_27
         }
     }
 
-    public class PassportRepository
+    public class PassportReposetory
+    {
+        private readonly DatabaseContext _databaseContext;
+
+        public PassportReposetory(DatabaseContext databaseContext)
+        {
+            if(databaseContext == null) 
+                throw new ArgumentNullException();
+
+            _databaseContext = databaseContext;
+        }
+
+        public PassportCheckResult GetPassportCheckResult(string hash)
+        {
+            if (string.IsNullOrWhiteSpace(hash))
+                throw new ArgumentNullException();
+
+            DataTable dataTable = _databaseContext.GetDataTable(hash);
+
+            if (dataTable.Rows.Count == 0)
+                return null;
+
+            bool granted = Convert.ToBoolean(dataTable.Rows[0].ItemArray[1]);
+
+            return new PassportCheckResult(granted);
+        }
+    }
+
+    public class DatabaseContext
     {
         private readonly string _dbPath;
 
-        public PassportRepository(string dbPath)
+        public DatabaseContext(string dbPath)
         {
-            if(dbPath == null)
+            if(string.IsNullOrWhiteSpace(dbPath))
                 throw new ArgumentNullException();
 
             _dbPath = dbPath;
         }
 
-        public DataTable GetPassportData(string hash)
+        public DataTable GetDataTable(string hash)
         {
-            if(hash == null) 
+            if (string.IsNullOrEmpty(hash))
                 throw new ArgumentNullException();
 
             string textFormat = "select * from passports where num='{0}' limit 1;";
@@ -186,24 +217,61 @@ namespace CleanCode_ExampleTask21_27
         }
     }
 
-    public class Menu
+    public class Menu : IMessegeViewer
     {
-        public Passport GetPassport()
-        {
-            return new Passport(Console.ReadLine());
-        }
+        private readonly MessegeBox _messegeBox;
+        private IPresenter _presenter;
 
-        public void ShowPassportInfo(PassportCheckResult result, Passport passport)
+        public Menu(MessegeBox messegeBox)
         {
-            if(passport == null)
+            if(messegeBox == null)
                 throw new ArgumentNullException();
 
-            if (result.Exist == false)
-                textResult.Text = "По паспорту «" + passport.Series + "» доступ к бюллетеню на дистанционном электронном голосовании ПРЕДОСТАВЛЕН";
-            else if (result.Granted)
-                textResult.Text = "По паспорту «" + passport.Series + "» доступ к бюллетеню на дистанционном электронном голосовании НЕ ПРЕДОСТАВЛЯЛСЯ";
-            else
-                textResult.Text = "Паспорт «" + passport.Series + "» в списке участников дистанционного голосования НЕ НАЙДЕН";
+            _messegeBox = messegeBox;
         }
+
+        public void HandleUserInput()
+        {
+            string input = Console.ReadLine();
+            _presenter.HandleData(input);
+        }
+
+        public void ShowMessege(string messege)
+        {
+            if(string.IsNullOrWhiteSpace(messege))
+                throw new ArgumentNullException();
+
+            _messegeBox.Show(messege);
+        }
+
+        public void SetPresenter(IPresenter presenter)
+        {
+            if(presenter == null)
+                throw new ArgumentNullException();
+
+            _presenter = presenter;
+        }
+    }
+
+    public class MessegeBox
+    {
+        public void Show(string messege)
+        {
+            if(string.IsNullOrWhiteSpace(messege))
+                throw new ArgumentNullException();
+
+            throw new NotImplementedException();
+        }
+    }
+
+    public interface IMessegeViewer
+    {
+        void ShowMessege(string messege);
+        void SetPresenter(IPresenter presenter);
+    }
+
+    public interface IPresenter
+    {
+        void HandleData(string data);
     }
 }
